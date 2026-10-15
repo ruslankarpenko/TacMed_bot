@@ -26,6 +26,30 @@ COL_STATUS = 10
 _client = None
 _sheet = None
 
+def _load_credentials():
+    json_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    if json_str:
+        print("=" * 60)
+        print(f"[creds] Довжина JSON: {len(json_str)} символів")
+        print(f"[creds] Починається з: {json_str[:50]!r}")
+        print(f"[creds] Закінчується на: {json_str[-60:]!r}")
+        print(f"[creds] Містить '\\\\n': {'\\\\n' in json_str}")
+        print(f"[creds] Містить реальні переноси: {chr(10) in json_str}")
+        print(f"[creds] Перші 10 символів після 'private_key_id': {json_str[:500]}")
+        
+        info = json.loads(json_str)
+        print(f"[creds] client_email: {info.get('client_email')}")
+        print(f"[creds] private_key_id: {info.get('private_key_id')}")
+        print(f"[creds] project_id: {info.get('project_id')}")
+        pk = info.get('private_key', '')
+        print(f"[creds] private_key починається з: {pk[:30]!r}")
+        print(f"[creds] private_key закінчується на: {pk[-30:]!r}")
+        print(f"[creds] Довжина private_key: {len(pk)}")
+        print("=" * 60)
+        return Credentials.from_service_account_info(info, scopes=SCOPES)
+    return Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
+
+
 def _get_sheet():
     global _client, _sheet
     if _sheet is None:
@@ -101,25 +125,3 @@ def clear_registration(user_id: int) -> bool:
     )
     return True
 
-def _load_credentials():
-    json_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
-    if json_str:
-        print("=" * 60)
-        print(f"[creds] Довжина JSON: {len(json_str)} символів")
-        print(f"[creds] Починається з: {json_str[:50]!r}")
-        print(f"[creds] Закінчується на: {json_str[-60:]!r}")
-        print(f"[creds] Містить '\\\\n': {'\\\\n' in json_str}")
-        print(f"[creds] Містить реальні переноси: {chr(10) in json_str}")
-        print(f"[creds] Перші 10 символів після 'private_key_id': {json_str[:500]}")
-        
-        info = json.loads(json_str)
-        print(f"[creds] client_email: {info.get('client_email')}")
-        print(f"[creds] private_key_id: {info.get('private_key_id')}")
-        print(f"[creds] project_id: {info.get('project_id')}")
-        pk = info.get('private_key', '')
-        print(f"[creds] private_key починається з: {pk[:30]!r}")
-        print(f"[creds] private_key закінчується на: {pk[-30:]!r}")
-        print(f"[creds] Довжина private_key: {len(pk)}")
-        print("=" * 60)
-        return Credentials.from_service_account_info(info, scopes=SCOPES)
-    return Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
