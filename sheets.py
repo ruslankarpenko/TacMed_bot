@@ -1,3 +1,6 @@
+import os
+import json
+import time
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
@@ -11,7 +14,6 @@ SCOPES = [
 STATUS_REGISTERED = "Зареєстрований"
 STATUS_NOT_REGISTERED = "Не зареєстровано"
 
-# Індекси колонок (1-based, як у gspread)
 COL_DATE = 1
 COL_TIME = 2
 COL_TG_ID = 3
@@ -27,63 +29,95 @@ _client = None
 _sheet = None
 
 
+def _load_credentials():
+    """Читає credentials з env-змінної (пріоритет) або з файлу (локально)."""
+    json_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    if json_str:
+        print("=" * 60)
+        print(f"[creds] Довжина JSON: {len(json_str)} символів")
+        info = json.loads(json_str)
+        print(f"[creds] client_email: {info.get('client_email')}")
+        print(f"[creds] private_key_id: {info.get('private_key_id')}")
+        pk = info.get('private_key', '')
+        print(f"[creds] Довжина private_key: {len(pk)}")
+        print("=" * 60)
+        return Credentials.from_service_account_info(info, scopes=SCOPES)
+
+    print("[creds] Використовую файл credentials.json (локальна розробка)")
+    return Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
+
+
+def _retry(func, *args, max_retries=4, **kwargs):
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            last_error = e
+            print(f"[sheets] спроба {attempt + 1}/{max_retries} не вдалась: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+    raise last_error
+
+
 def _get_sheet():
     global _client, _sheet
     if _sheet is None:
-        creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
-        _client = gspread.authorize(creds)
-        _sheet = _client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        def _init():
+            global _client, _sheet
+            creds = _load_credentials()   # ← КРИТИЧНО: виклик _load_credentials!
+            _client = gspread.authorize(creds)
+            _sheet = _client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        _retry(_init)
     return _sheet
 
 
 def _find_row(user_id: int):
-    """Повертає номер рядка за Telegram ID або None."""
-    try:
+    def _do():
         ids = _get_sheet().col_values(COL_TG_ID)
+        for idx, value in enumerate(ids, start=1):
+            if str(value).strip() == str(user_id):
+                return idx
+        return None
+    try:
+        return _retry(_do)
     except Exception as e:
         print(f"[sheets] find_row error: {e}")
         return None
-    for idx, value in enumerate(ids, start=1):
-        if str(value).strip() == str(user_id):
-            return idx
-    return None
 
 
 def ensure_user_row(user_id: int, username: str | None, tg_first_name: str | None):
-    """Викликається на /start. Створює рядок, якщо його ще немає."""
-    if _find_row(user_id) is not None:
-        return
-    now = datetime.now()
-    row = [
-        now.strftime("%d.%m.%Y"),
-        now.strftime("%H:%M:%S"),
-        str(user_id),
-        f"@{username}" if username else "—",
-        tg_first_name or "—",
-        "—",  # Прізвище
-        "—",  # Інститут
-        "—",  # Група
-        "—",  # Курс
-        STATUS_NOT_REGISTERED,
-    ]
-    _get_sheet().append_row(row, value_input_option="USER_ENTERED")
+    try:
+        if _find_row(user_id) is not None:
+            return
+        now = datetime.now()
+        row = [
+            now.strftime("%d.%m.%Y"),
+            now.strftime("%H:%M:%S"),
+            str(user_id),
+            f"@{username}" if username else "—",
+            tg_first_name or "—",
+            "—", "—", "—", "—",
+            STATUS_NOT_REGISTERED,
+        ]
+        _retry(_get_sheet().append_row, row, value_input_option="USER_ENTERED")
+    except Exception as e:
+        print(f"[sheets] ensure_user_row помилка: {e}")
 
 
 def save_registration(user_id, first_name, last_name, institute, group, course):
-    """Оновлює рядок користувача даними реєстрації."""
     row_idx = _find_row(user_id)
     if row_idx is None:
-        # На випадок, якщо рядок зник — створюємо
         now = datetime.now()
-        _get_sheet().append_row([
-            now.strftime("%d.%m.%Y"), now.strftime("%H:%M:%S"), str(user_id),
-            "—", first_name, last_name, institute, group, course, STATUS_REGISTERED,
-        ], value_input_option="USER_ENTERED")
+        _retry(
+            _get_sheet().append_row,
+            [now.strftime("%d.%m.%Y"), now.strftime("%H:%M:%S"), str(user_id),
+             "—", first_name, last_name, institute, group, course, STATUS_REGISTERED],
+            value_input_option="USER_ENTERED",
+        )
         return
-
-    sheet = _get_sheet()
-    # Оновлюємо тільки поля реєстрації + статус (дата/час/username лишаємо)
-    sheet.update(
+    _retry(
+        _get_sheet().update,
         f"E{row_idx}:J{row_idx}",
         [[first_name, last_name, institute, group, course, STATUS_REGISTERED]],
         value_input_option="USER_ENTERED",
@@ -91,11 +125,11 @@ def save_registration(user_id, first_name, last_name, institute, group, course):
 
 
 def clear_registration(user_id: int) -> bool:
-    """Скасовує реєстрацію: чистить поля, ставить статус «Не зареєстровано»."""
     row_idx = _find_row(user_id)
     if row_idx is None:
         return False
-    _get_sheet().update(
+    _retry(
+        _get_sheet().update,
         f"E{row_idx}:J{row_idx}",
         [["—", "—", "—", "—", "—", STATUS_NOT_REGISTERED]],
         value_input_option="USER_ENTERED",
