@@ -85,22 +85,45 @@ async def reg_group(message: Message, state: FSMContext):
 @router.callback_query(Registration.confirm, F.data == "reg_confirm")
 async def reg_confirm(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    print("=" * 60)
+    print(f"[reg_confirm] Дані з FSM: {data}")
+    print(f"[reg_confirm] User ID: {call.from_user.id}")
+    
     try:
+        import sheets
+        print(f"[reg_confirm] Викликаю sheets.save_registration...")
         sheets.save_registration(
             call.from_user.id,
             data["first_name"], data["last_name"],
             data["institute"], data["group"], data["course"],
         )
+        print(f"[reg_confirm] ✅ save_registration виконано")
+        
+        from database import mark_registered
         mark_registered(call.from_user.id)
+        print(f"[reg_confirm] ✅ mark_registered виконано")
+        
         await call.message.edit_text(
             "🎉 Готово! Тебе зареєстровано на тренінг.\n"
-            "Чекаємо на тебе в п'ятницю, 23 жовтня, в Студентській бібліотеці 😊",
+            "Чекай на деталі від адміністратора.",
             reply_markup=back_to_menu_kb(is_reg=True),
         )
+        print(f"[reg_confirm] ✅ Повідомлення надіслано")
+        
     except Exception as e:
-        print(f"[reg_confirm] error: {e}")
+        import traceback
+        print("=" * 60)
+        print(f"[reg_confirm] ❌❌❌ ПОМИЛКА:")
+        print(f"[reg_confirm] Тип: {type(e).__name__}")
+        print(f"[reg_confirm] Повідомлення: {e}")
+        traceback.print_exc()
+        print("=" * 60)
+        
         await call.message.edit_text(
-            "Ой, сталася помилка при збереженні 😔\nСпробуй пізніше або напиши адміну.",
+            f"Ой, сталася помилка при збереженні 😔\n\n"
+            f"<code>{type(e).__name__}: {e}</code>\n\n"
+            "Спробуй пізніше або напиши адміну.",
+            parse_mode="HTML",
             reply_markup=back_to_menu_kb(),
         )
     await state.clear()
