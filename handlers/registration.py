@@ -6,8 +6,9 @@ from aiogram.fsm.context import FSMContext
 from states import Registration
 from keyboards import institutes_kb, confirm_kb, back_to_menu_kb, main_menu_kb
 import sheets
-from database import (
-    is_registered, mark_registered, unmark_registered, registration_open,
+from sheets import (
+    is_registered, save_registration, clear_registration,
+    registration_open,
 )
 
 router = Router()
