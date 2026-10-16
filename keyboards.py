@@ -1,5 +1,5 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from config import INSTITUTES
+from config import INSTITUTES, NOT_STUDENT
 
 
 def main_menu_kb(is_reg: bool = False) -> InlineKeyboardMarkup:
@@ -13,32 +13,23 @@ def main_menu_kb(is_reg: bool = False) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from config import INSTITUTES, NOT_STUDENT
-
-
 def institutes_kb() -> InlineKeyboardMarkup:
     rows = []
     row = []
-
-    # Основні інститути — по 3 у рядку
     for inst in INSTITUTES:
         if inst == NOT_STUDENT:
-            continue  # пропускаємо — додамо окремо внизу
+            continue  # додамо окремим рядком знизу
         row.append(InlineKeyboardButton(text=inst, callback_data=f"inst:{inst}"))
         if len(row) == 3:
             rows.append(row)
             row = []
     if row:
         rows.append(row)
-
-    # Окремий рядок для «Не є студентом політехніки»
+    # Окрема кнопка на всю ширину
     rows.append([InlineKeyboardButton(
         text=f"🎓 {NOT_STUDENT}",
         callback_data=f"inst:{NOT_STUDENT}",
     )])
-
-    # Скасувати
     rows.append([InlineKeyboardButton(text="❌ Скасувати", callback_data="cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
