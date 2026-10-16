@@ -8,6 +8,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, PORT
+from database import init_db
 from handlers import start, registration, feedback, admin
 from web import app as flask_app
 
@@ -19,6 +20,10 @@ log = logging.getLogger(__name__)
 def run_flask():
     # Render дає PORT через env
     flask_app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
+
+
+async def main():
+    init_db()
 
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
