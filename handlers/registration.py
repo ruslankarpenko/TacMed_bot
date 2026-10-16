@@ -3,6 +3,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
+from config import NOT_STUDENT
 from states import Registration
 from keyboards import institutes_kb, confirm_kb, back_to_menu_kb, main_menu_kb
 from sheets import (
@@ -50,10 +51,34 @@ async def reg_last(message: Message, state: FSMContext):
     )
 
 
+from config import NOT_STUDENT
+
+# ... (інші імпорти залишаються)
+
+
 @router.callback_query(Registration.institute, F.data.startswith("inst:"))
 async def reg_institute(call: CallbackQuery, state: FSMContext):
     inst = call.data.split(":", 1)[1]
     await state.update_data(institute=inst)
+
+    if inst == NOT_STUDENT:
+        # Пропускаємо групу і курс
+        await state.update_data(group="—", course="—")
+        data = await state.get_data()
+
+        summary = (
+            "Перевір свої дані 👇\n\n"
+            f"👤 Ім'я: <b>{data['first_name']}</b>\n"
+            f"👤 Прізвище: <b>{data['last_name']}</b>\n"
+            f"🏛 Інститут: <b>{inst}</b>\n\n"
+            "Все вірно?"
+        )
+        await state.set_state(Registration.confirm)
+        await call.message.edit_text(summary, parse_mode="HTML", reply_markup=confirm_kb())
+        await call.answer()
+        return
+
+    # Звичайний студент — питаємо групу
     await state.set_state(Registration.group)
     await call.message.edit_text(
         f"Інститут: <b>{inst}</b>\n\nКрок 4/4. Введи свою <b>групу</b> (наприклад, АР-112):",
