@@ -4,7 +4,10 @@ import time
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
-from config import SPREADSHEET_ID, SHEET_NAME, CREDENTIALS_FILE
+from config import (
+    SPREADSHEET_ID, SHEET_NAME, CREDENTIALS_FILE,
+    REPLIES_SHEET, SETTINGS_SHEET,
+)
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -14,6 +17,7 @@ SCOPES = [
 STATUS_REGISTERED = "Зареєстрований"
 STATUS_NOT_REGISTERED = "Не зареєстровано"
 
+# Індекси колонок (1-based)
 COL_DATE = 1
 COL_TIME = 2
 COL_TG_ID = 3
@@ -26,7 +30,7 @@ COL_COURSE = 9
 COL_STATUS = 10
 
 _client = None
-_sheet = None
+_spreadsheet = None
 
 
 def _load_credentials():
@@ -48,6 +52,7 @@ def _load_credentials():
 
 
 def _retry(func, *args, max_retries=4, **kwargs):
+    """Повторює виклик при мережевих помилках."""
     last_error = None
     for attempt in range(max_retries):
         try:
@@ -60,19 +65,27 @@ def _retry(func, *args, max_retries=4, **kwargs):
     raise last_error
 
 
-def _get_sheet():
-    global _client, _sheet
-    if _sheet is None:
+def _get_spreadsheet():
+    global _client, _spreadsheet
+    if _spreadsheet is None:
         def _init():
-            global _client, _sheet
-            creds = _load_credentials()   # ← КРИТИЧНО: виклик _load_credentials!
+            global _client, _spreadsheet
+            creds = _load_credentials()
             _client = gspread.authorize(creds)
-            _sheet = _client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+            _spreadsheet = _client.open_by_key(SPREADSHEET_ID)
         _retry(_init)
-    return _sheet
+    return _spreadsheet
 
+
+def _get_sheet(name=None):
+    name = name or SHEET_NAME
+    return _get_spreadsheet().worksheet(name)
+
+
+# ===== ОСНОВНИЙ АРКУШ (реєстрація) =====
 
 def _find_row(user_id: int):
+    """Повертає номер рядка за Telegram ID або None."""
     def _do():
         ids = _get_sheet().col_values(COL_TG_ID)
         for idx, value in enumerate(ids, start=1):
@@ -87,6 +100,7 @@ def _find_row(user_id: int):
 
 
 def ensure_user_row(user_id: int, username: str | None, tg_first_name: str | None):
+    """Створює рядок користувача при /start, якщо його ще немає."""
     try:
         if _find_row(user_id) is not None:
             return
@@ -106,6 +120,7 @@ def ensure_user_row(user_id: int, username: str | None, tg_first_name: str | Non
 
 
 def save_registration(user_id, first_name, last_name, institute, group, course):
+    """Оновлює рядок користувача даними реєстрації."""
     row_idx = _find_row(user_id)
     if row_idx is None:
         now = datetime.now()
@@ -125,6 +140,7 @@ def save_registration(user_id, first_name, last_name, institute, group, course):
 
 
 def clear_registration(user_id: int) -> bool:
+    """Скасовує реєстрацію: чистить поля, ставить статус «Не зареєстровано»."""
     row_idx = _find_row(user_id)
     if row_idx is None:
         return False
@@ -135,3 +151,114 @@ def clear_registration(user_id: int) -> bool:
         value_input_option="USER_ENTERED",
     )
     return True
+
+
+def is_registered(user_id: int) -> bool:
+    """Читає статус реєстрації з основного аркуша."""
+    try:
+        sheet = _get_sheet()
+        ids = sheet.col_values(COL_TG_ID)
+        statuses = sheet.col_values(COL_STATUS)
+        for i, uid in enumerate(ids):
+            if str(uid).strip() == str(user_id) and i < len(statuses):
+                return statuses[i].strip() == STATUS_REGISTERED
+        return False
+    except Exception as e:
+        print(f"[sheets] is_registered error: {e}")
+        return False
+
+
+# ===== РОЗСИЛКА =====
+
+def get_all_user_ids() -> list[int]:
+    """Усі, хто натискав /start."""
+    try:
+        values = _get_sheet().col_values(COL_TG_ID)[1:]  # без заголовка
+        return [int(v) for v in values if v.strip().isdigit()]
+    except Exception as e:
+        print(f"[sheets] get_all_user_ids error: {e}")
+        return []
+
+
+def get_registered_user_ids() -> list[int]:
+    """Тільки ті, хто зареєструвався."""
+    try:
+        sheet = _get_sheet()
+        ids = sheet.col_values(COL_TG_ID)[1:]
+        statuses = sheet.col_values(COL_STATUS)[1:]
+        result = []
+        for uid, st in zip(ids, statuses):
+            if st.strip() == STATUS_REGISTERED and uid.strip().isdigit():
+                result.append(int(uid))
+        return result
+    except Exception as e:
+        print(f"[sheets] get_registered_user_ids error: {e}")
+        return []
+
+
+# ===== REPLY (аркуш Replies) =====
+
+def save_admin_msg(admin_msg_id: int, user_id: int):
+    """Зберігає зв'язку admin_msg_id → user_id для reply."""
+    try:
+        _retry(
+            _get_sheet(REPLIES_SHEET).append_row,
+            [str(admin_msg_id), str(user_id), datetime.now().strftime("%d.%m.%Y %H:%M:%S")],
+            value_input_option="USER_ENTERED",
+        )
+    except Exception as e:
+        print(f"[sheets] save_admin_msg error: {e}")
+
+
+def get_user_for_admin_msg(admin_msg_id: int) -> int | None:
+    """Знаходить user_id за admin_msg_id."""
+    try:
+        sheet = _get_sheet(REPLIES_SHEET)
+        rows = sheet.get_all_values()[1:]  # без заголовка
+        for row in rows:
+            if len(row) >= 2 and str(row[0]).strip() == str(admin_msg_id):
+                return int(row[1])
+        return None
+    except Exception as e:
+        print(f"[sheets] get_user_for_admin_msg error: {e}")
+        return None
+
+
+# ===== SETTINGS (аркуш Settings) =====
+
+def registration_open() -> bool:
+    """Чи відкрита реєстрація."""
+    try:
+        sheet = _get_sheet(SETTINGS_SHEET)
+        rows = sheet.get_all_values()[1:]  # без заголовка
+        for row in rows:
+            if len(row) >= 2 and row[0].strip() == "registration_open":
+                return row[1].strip() == "1"
+        return True  # default
+    except Exception as e:
+        print(f"[sheets] registration_open error: {e}")
+        return True
+
+
+def set_registration_open(open_: bool):
+    """Встановлює стан реєстрації."""
+    try:
+        sheet = _get_sheet(SETTINGS_SHEET)
+        rows = sheet.get_all_values()
+        for i, row in enumerate(rows):
+            if row and row[0].strip() == "registration_open":
+                _retry(
+                    sheet.update,
+                    f"B{i+1}",
+                    [["1" if open_ else "0"]],
+                    value_input_option="USER_ENTERED",
+                )
+                return
+        # якщо рядка немає — додати
+        _retry(
+            sheet.append_row,
+            ["registration_open", "1" if open_ else "0"],
+            value_input_option="USER_ENTERED",
+        )
+    except Exception as e:
+        print(f"[sheets] set_registration_open error: {e}")
