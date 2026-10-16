@@ -1,3 +1,4 @@
+targets = get_all_user_ids() if audience == "all" else get_registered_user_ids()
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
