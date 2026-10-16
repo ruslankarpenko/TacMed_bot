@@ -3,7 +3,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery, FSInputFile
 
 from keyboards import main_menu_kb, back_to_menu_kb
-from database import add_user, is_registered
+from sheets import ensure_user_row, is_registered
 import sheets
 
 router = Router()
