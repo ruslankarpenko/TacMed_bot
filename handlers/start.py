@@ -32,13 +32,11 @@ PHOTO_PATH = "photo.png"
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     u = message.from_user
-    add_user(u.id, u.username, u.first_name)
-    # Додаємо рядок у Google Таблицю, якщо його ще немає
+    # add_user(u.id, u.username, u.first_name)  ← прибрати
     try:
-        sheets.ensure_user_row(u.id, u.username, u.first_name)
+        ensure_user_row(u.id, u.username, u.first_name)
     except Exception as e:
         print(f"[start] sheets error: {e}")
-
     await message.answer(WELCOME, reply_markup=main_menu_kb(is_registered(u.id)))
 
 
