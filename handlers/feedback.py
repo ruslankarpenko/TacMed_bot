@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from states import Feedback
 from keyboards import back_to_menu_kb
 from config import ADMIN_ID
-from database import save_admin_msg, is_registered
+from sheets import save_admin_msg, is_registered, get_user_for_admin_msg
 
 router = Router()
 
