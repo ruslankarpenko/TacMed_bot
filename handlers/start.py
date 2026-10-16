@@ -3,7 +3,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery, FSInputFile
 
 from keyboards import main_menu_kb, back_to_menu_kb
-from sheets import ensure_user_row, is_registered
+from database import add_user, is_registered
 import sheets
 
 router = Router()
@@ -32,11 +32,13 @@ PHOTO_PATH = "photo.png"
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     u = message.from_user
-    # add_user(u.id, u.username, u.first_name)  ← прибрати
+    add_user(u.id, u.username, u.first_name)
+    # Додаємо рядок у Google Таблицю, якщо його ще немає
     try:
-        ensure_user_row(u.id, u.username, u.first_name)
+        sheets.ensure_user_row(u.id, u.username, u.first_name)
     except Exception as e:
         print(f"[start] sheets error: {e}")
+
     await message.answer(WELCOME, reply_markup=main_menu_kb(is_registered(u.id)))
 
 
