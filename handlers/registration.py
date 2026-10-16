@@ -3,14 +3,11 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
-from config import NOT_STUDENT
 from states import Registration
 from keyboards import institutes_kb, confirm_kb, back_to_menu_kb, main_menu_kb
-from sheets import (
-    is_registered,
-    save_registration,
-    clear_registration,
-    registration_open,
+import sheets
+from database import (
+    is_registered, mark_registered, unmark_registered, registration_open,
 )
 
 router = Router()
@@ -44,41 +41,14 @@ async def reg_first(message: Message, state: FSMContext):
 async def reg_last(message: Message, state: FSMContext):
     await state.update_data(last_name=message.text.strip())
     await state.set_state(Registration.institute)
-    await message.answer(
-        "Крок 3/4. Обери свій <b>інститут</b>:",
-        parse_mode="HTML",
-        reply_markup=institutes_kb(),
-    )
-
-
-from config import NOT_STUDENT
-
-# ... (інші імпорти залишаються)
+    await message.answer("Крок 3/4. Обери свій <b>інститут</b>:", parse_mode="HTML",
+                         reply_markup=institutes_kb())
 
 
 @router.callback_query(Registration.institute, F.data.startswith("inst:"))
 async def reg_institute(call: CallbackQuery, state: FSMContext):
     inst = call.data.split(":", 1)[1]
     await state.update_data(institute=inst)
-
-    if inst == NOT_STUDENT:
-        # Пропускаємо групу і курс
-        await state.update_data(group="—", course="—")
-        data = await state.get_data()
-
-        summary = (
-            "Перевір свої дані 👇\n\n"
-            f"👤 Ім'я: <b>{data['first_name']}</b>\n"
-            f"👤 Прізвище: <b>{data['last_name']}</b>\n"
-            f"🏛 Інститут: <b>{inst}</b>\n\n"
-            "Все вірно?"
-        )
-        await state.set_state(Registration.confirm)
-        await call.message.edit_text(summary, parse_mode="HTML", reply_markup=confirm_kb())
-        await call.answer()
-        return
-
-    # Звичайний студент — питаємо групу
     await state.set_state(Registration.group)
     await call.message.edit_text(
         f"Інститут: <b>{inst}</b>\n\nКрок 4/4. Введи свою <b>групу</b> (наприклад, АР-112):",
@@ -90,6 +60,7 @@ async def reg_institute(call: CallbackQuery, state: FSMContext):
 @router.message(Registration.group, F.text)
 async def reg_group(message: Message, state: FSMContext):
     group = message.text.strip().upper()
+    # Курс — перша цифра з номера групи
     m = re.search(r"\d", group)
     if not m:
         await message.answer("У групі має бути хоча б одна цифра. Спробуй ще раз 👇")
@@ -115,26 +86,39 @@ async def reg_group(message: Message, state: FSMContext):
 async def reg_confirm(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     print("=" * 60)
-    print(f"[reg_confirm] Дані: {data}")
+    print(f"[reg_confirm] Дані з FSM: {data}")
     print(f"[reg_confirm] User ID: {call.from_user.id}")
-
+    
     try:
-        save_registration(
+        import sheets
+        print(f"[reg_confirm] Викликаю sheets.save_registration...")
+        sheets.save_registration(
             call.from_user.id,
             data["first_name"], data["last_name"],
             data["institute"], data["group"], data["course"],
         )
-        print("[reg_confirm] ✅ Збережено в Google Таблицю")
-
+        print(f"[reg_confirm] ✅ save_registration виконано")
+        
+        from database import mark_registered
+        mark_registered(call.from_user.id)
+        print(f"[reg_confirm] ✅ mark_registered виконано")
+        
         await call.message.edit_text(
             "🎉 Готово! Тебе зареєстровано на тренінг.\n"
             "Чекай на деталі від адміністратора.",
             reply_markup=back_to_menu_kb(is_reg=True),
         )
+        print(f"[reg_confirm] ✅ Повідомлення надіслано")
+        
     except Exception as e:
         import traceback
-        print(f"[reg_confirm] ❌ ПОМИЛКА: {type(e).__name__}: {e}")
+        print("=" * 60)
+        print(f"[reg_confirm] ❌❌❌ ПОМИЛКА:")
+        print(f"[reg_confirm] Тип: {type(e).__name__}")
+        print(f"[reg_confirm] Повідомлення: {e}")
         traceback.print_exc()
+        print("=" * 60)
+        
         await call.message.edit_text(
             f"Ой, сталася помилка при збереженні 😔\n\n"
             f"<code>{type(e).__name__}: {e}</code>\n\n"
@@ -149,10 +133,7 @@ async def reg_confirm(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "cancel")
 async def reg_cancel_dialog(call: CallbackQuery, state: FSMContext):
     await state.clear()
-    await call.message.edit_text(
-        "Окей, скасовано.",
-        reply_markup=main_menu_kb(is_registered(call.from_user.id)),
-    )
+    await call.message.edit_text("Окей, скасовано.", reply_markup=main_menu_kb(is_registered(call.from_user.id)))
     await call.answer()
 
 
@@ -161,7 +142,8 @@ async def reg_cancel_registration(call: CallbackQuery, state: FSMContext):
     """Скасування вже наявної реєстрації."""
     await state.clear()
     try:
-        clear_registration(call.from_user.id)
+        sheets.clear_registration(call.from_user.id)
+        unmark_registered(call.from_user.id)
         await call.message.edit_text(
             "🗑 Твою реєстрацію скасовано.\n"
             "Якщо захочеш знову — натисни «Так, хочу зареєструватись».",
