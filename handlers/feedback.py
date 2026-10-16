@@ -1,4 +1,3 @@
-targets = get_all_user_ids() if audience == "all" else get_registered_user_ids()
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
@@ -6,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from states import Feedback
 from keyboards import back_to_menu_kb
 from config import ADMIN_ID
-from sheets import save_admin_msg, is_registered, get_user_for_admin_msg
+from database import save_admin_msg, is_registered
 
 router = Router()
 
