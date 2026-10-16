@@ -4,7 +4,7 @@ import time
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
-from config import SPREADSHEET_ID, SHEET_NAME, CREDENTIALS_FILE, REPLIES_SHEET, SETTINGS_SHEET
+from config import SPREADSHEET_ID, SHEET_NAME, CREDENTIALS_FILE
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -26,14 +26,24 @@ COL_COURSE = 9
 COL_STATUS = 10
 
 _client = None
-_spreadsheet = None
+_sheet = None
 
 
 def _load_credentials():
+    """Читає credentials з env-змінної (пріоритет) або з файлу (локально)."""
     json_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
     if json_str:
+        print("=" * 60)
+        print(f"[creds] Довжина JSON: {len(json_str)} символів")
         info = json.loads(json_str)
+        print(f"[creds] client_email: {info.get('client_email')}")
+        print(f"[creds] private_key_id: {info.get('private_key_id')}")
+        pk = info.get('private_key', '')
+        print(f"[creds] Довжина private_key: {len(pk)}")
+        print("=" * 60)
         return Credentials.from_service_account_info(info, scopes=SCOPES)
+
+    print("[creds] Використовую файл credentials.json (локальна розробка)")
     return Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
 
 
@@ -50,24 +60,17 @@ def _retry(func, *args, max_retries=4, **kwargs):
     raise last_error
 
 
-def _get_spreadsheet():
-    global _client, _spreadsheet
-    if _spreadsheet is None:
+def _get_sheet():
+    global _client, _sheet
+    if _sheet is None:
         def _init():
-            global _client, _spreadsheet
-            creds = _load_credentials()
+            global _client, _sheet
+            creds = _load_credentials()   # ← КРИТИЧНО: виклик _load_credentials!
             _client = gspread.authorize(creds)
-            _spreadsheet = _client.open_by_key(SPREADSHEET_ID)
+            _sheet = _client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
         _retry(_init)
-    return _spreadsheet
+    return _sheet
 
-
-def _get_sheet(name=None):
-    name = name or SHEET_NAME
-    return _get_spreadsheet().worksheet(name)
-
-
-# ===== ОСНОВНИЙ АРКУШ (реєстрація) =====
 
 def _find_row(user_id: int):
     def _do():
@@ -132,96 +135,3 @@ def clear_registration(user_id: int) -> bool:
         value_input_option="USER_ENTERED",
     )
     return True
-
-
-def is_registered(user_id: int) -> bool:
-    """Читає статус з основного аркуша."""
-    try:
-        sheet = _get_sheet()
-        ids = sheet.col_values(COL_TG_ID)
-        statuses = sheet.col_values(COL_STATUS)
-        for i, uid in enumerate(ids):
-            if str(uid).strip() == str(user_id) and i < len(statuses):
-                return statuses[i].strip() == STATUS_REGISTERED
-        return False
-    except Exception as e:
-        print(f"[sheets] is_registered error: {e}")
-        return False
-
-
-# ===== РОЗСИЛКА =====
-
-def get_all_user_ids() -> list[int]:
-    try:
-        values = _get_sheet().col_values(COL_TG_ID)[1:]
-        return [int(v) for v in values if v.strip().isdigit()]
-    except Exception as e:
-        print(f"[sheets] get_all_user_ids error: {e}")
-        return []
-
-
-def get_registered_user_ids() -> list[int]:
-    try:
-        sheet = _get_sheet()
-        ids = sheet.col_values(COL_TG_ID)[1:]
-        statuses = sheet.col_values(COL_STATUS)[1:]
-        return [int(uid) for uid, st in zip(ids, statuses)
-                if st.strip() == STATUS_REGISTERED and uid.strip().isdigit()]
-    except Exception as e:
-        print(f"[sheets] get_registered_user_ids error: {e}")
-        return []
-
-
-# ===== REPLY (аркуш Replies) =====
-
-def save_admin_msg(admin_msg_id: int, user_id: int):
-    try:
-        _retry(_get_sheet(REPLIES_SHEET).append_row,
-               [str(admin_msg_id), str(user_id), datetime.now().strftime("%d.%m.%Y %H:%M:%S")],
-               value_input_option="USER_ENTERED")
-    except Exception as e:
-        print(f"[sheets] save_admin_msg error: {e}")
-
-
-def get_user_for_admin_msg(admin_msg_id: int) -> int | None:
-    try:
-        sheet = _get_sheet(REPLIES_SHEET)
-        rows = sheet.get_all_values()[1:]  # без заголовка
-        for row in rows:
-            if len(row) >= 2 and str(row[0]).strip() == str(admin_msg_id):
-                return int(row[1])
-        return None
-    except Exception as e:
-        print(f"[sheets] get_user_for_admin_msg error: {e}")
-        return None
-
-
-# ===== SETTINGS (аркуш Settings) =====
-
-def registration_open() -> bool:
-    try:
-        sheet = _get_sheet(SETTINGS_SHEET)
-        rows = sheet.get_all_values()[1:]
-        for row in rows:
-            if len(row) >= 2 and row[0].strip() == "registration_open":
-                return row[1].strip() == "1"
-        return True  # default
-    except Exception as e:
-        print(f"[sheets] registration_open error: {e}")
-        return True
-
-
-def set_registration_open(open_: bool):
-    try:
-        sheet = _get_sheet(SETTINGS_SHEET)
-        rows = sheet.get_all_values()
-        for i, row in enumerate(rows):
-            if row and row[0].strip() == "registration_open":
-                _retry(sheet.update, f"B{i+1}", [["1" if open_ else "0"]],
-                       value_input_option="USER_ENTERED")
-                return
-        # якщо рядка немає — додати
-        _retry(sheet.append_row, ["registration_open", "1" if open_ else "0"],
-               value_input_option="USER_ENTERED")
-    except Exception as e:
-        print(f"[sheets] set_registration_open error: {e}")
