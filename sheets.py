@@ -128,3 +128,32 @@ def clear_registration(user_id: int) -> bool:
         value_input_option="USER_ENTERED",
     )
     return True
+
+
+# ===== ФУНКЦІЇ ДЛЯ РОЗСИЛКИ (читають з Google Таблиці) =====
+
+def get_all_user_ids() -> list[int]:
+    """Читає всі Telegram ID з колонки C (всі, хто запускав бота)."""
+    try:
+        sheet = _get_sheet()
+        values = sheet.col_values(COL_TG_ID)[1:]  # [1:] — щоб пропустити заголовок
+        return [int(v) for v in values if v.strip().isdigit()]
+    except Exception as e:
+        print(f"[sheets] get_all_user_ids error: {e}")
+        return []
+
+def get_registered_user_ids() -> list[int]:
+    """Читає ID тих, у кого статус 'Зареєстрований' (з колонки C та J)."""
+    try:
+        sheet = _get_sheet()
+        ids = sheet.col_values(COL_TG_ID)[1:]
+        statuses = sheet.col_values(COL_STATUS)[1:]
+        
+        result = []
+        for uid, status in zip(ids, statuses):
+            if status.strip() == STATUS_REGISTERED and uid.strip().isdigit():
+                result.append(int(uid))
+        return result
+    except Exception as e:
+        print(f"[sheets] get_registered_user_ids error: {e}")
+        return []
