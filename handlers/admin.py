@@ -8,9 +8,8 @@ from states import AdminFlow
 from keyboards import (
     admin_menu_kb, broadcast_audience_kb, admin_cancel_kb,
 )
-from database import (
-    all_users, registered_users, registration_open, set_registration_open,
-)
+from database import registration_open, set_registration_open
+from sheets import get_all_user_ids, get_registered_user_ids
 
 router = Router()
 
