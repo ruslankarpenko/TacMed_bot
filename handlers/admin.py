@@ -94,7 +94,7 @@ async def admin_broadcast_send(message: Message, state: FSMContext):
     data = await state.get_data()
     audience = data.get("audience", "all")
 
-    targets = all_users() if audience == "all" else registered_users()
+    targets = get_all_user_ids() if audience == "all" else get_registered_user_ids()
     targets = [uid for uid in targets if uid != ADMIN_ID]
 
     sent, failed = 0, 0
